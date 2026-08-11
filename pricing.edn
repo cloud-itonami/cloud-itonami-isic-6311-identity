@@ -120,7 +120,13 @@
   {:gate/id :metering :gate/met true
    :gate/note "authn.usage live 2026-08-11; the read endpoint is fail-closed until AUTHN_USAGE_TOKEN is set"}
   {:gate/id :availability-statement :gate/met false
-   :gate/note "no status page or SLO published for authn.kotobase.net itself"}
+   :gate/note "an external prober runs every 5 minutes since 2026-08-11 (scripts/probe.cljs,
+               com.gftd.identity-probe) and kotoba-lang/uptime computes the statement, but the
+               observations live only on the operator machine and no statement is published.
+               The reason this gate is open changed from 'nothing measures' to 'nothing
+               publishes'. It also cannot close on coverage yet: measured 2026-08-11, 100% over
+               4 probes is 1.4% of the expected schedule and slo-verdict correctly answers
+               :cannot-say rather than :met."}
   {:gate/id :terms :gate/met false
    :gate/note "cloud-itonami's existing legal pages cover other businesses, not an identity service"}
   {:gate/id :custody-disclosure :gate/met true
