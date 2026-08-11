@@ -1,0 +1,130 @@
+#!/usr/bin/env nbb
+;; 外形監視。観測を append し、statement を測定値からだけ組む。
+;;
+;;   nbb --classpath ../../kotoba-lang/uptime/src scripts/probe.cljs           ; 1 周観測する
+;;   nbb --classpath ../../kotoba-lang/uptime/src scripts/probe.cljs --report  ; 観測から statement を出す
+;;
+;; ## なぜ外から測るか
+;;
+;; 「動いているか」を自分自身に聞く service は、落ちている時に何も言わない。
+;; この prober は Cloudflare の外（operator マシン、将来は fleet ノード）から
+;; 叩くので、**worker が落ちていれば観測が :down として残る**。
+;;
+;; ## なぜ append-only か
+;;
+;; 観測は文書ではなく測定列で、CLAUDE.md（ADR-2607257000）が append-only を
+;; 維持すると名指しした種類のデータ。過去の観測を書き換えられる形にすると、
+;; 可用性の主張が事後に作れてしまう。
+;;
+;; ## 何を書かないか
+;;
+;; **prober 自身が失敗したときは :down ではなく :inconclusive を書く。**
+;; 自宅の DNS が落ちた・ラップトップが寝ていた、は service の障害ではない。
+;; ここを混ぜると、数字は誰も信じなくなる（uptime.core の namespace docstring）。
+
+(ns probe
+  (:require ["node:fs" :as fs]
+            [clojure.string :as str]
+            [uptime.core :as up]))
+
+(def targets
+  "測る対象。`/health` を選ぶのは、認証そのものを毎分実行せずに service が
+   応答することを見るため —— 監視が副作用を持つと、監視自体が負荷になる。"
+  [{:url "https://authn.kotobase.net/health" :expect 200}
+   {:url "https://authn.kotobase.net/v1/session" :expect 200}
+   {:url "https://app.itonami.cloud/auth/health" :expect 200}])
+
+(def observations-file "observations.edn")
+(def statement-file "availability.edn")
+
+(def timeout-ms
+  "10 秒。これを超えたら :down ではなく :inconclusive にする —— 遅いことと
+   落ちていることは別で、prober 側の回線でも起こる。"
+  10000)
+
+(defn- probe! [{:keys [url expect]}]
+  (let [started (js/Date.now)
+        ctl (js/AbortController.)
+        timer (js/setTimeout #(.abort ctl) timeout-ms)]
+    (-> (js/fetch url #js {:signal (.-signal ctl)
+                           :headers #js {"user-agent" "cloud-itonami-identity-probe/1"}})
+        (.then (fn [res]
+                 (js/clearTimeout timer)
+                 (up/observation {:target url
+                                  :at started
+                                  :latency-ms (- (js/Date.now) started)
+                                  :status (.-status res)
+                                  :outcome (if (= expect (.-status res)) :up :down)
+                                  :detail (when (not= expect (.-status res))
+                                            (str "expected " expect ", got " (.-status res)))})))
+        (.catch (fn [e]
+                  (js/clearTimeout timer)
+                  ;; ここが :down でないことが、この prober の一番大事な性質。
+                  (up/observation {:target url
+                                   :at started
+                                   :latency-ms (- (js/Date.now) started)
+                                   :outcome :inconclusive
+                                   :detail (str "probe failed: " (or (.-message e) e))}))))))
+
+(defn- append! [observations]
+  (let [lines (str/join "\n" (map pr-str observations))]
+    (fs/appendFileSync observations-file (str lines "\n"))))
+
+(defn- read-observations []
+  (if-not (fs/existsSync observations-file)
+    []
+    (->> (str/split-lines (fs/readFileSync observations-file "utf8"))
+         (remove str/blank?)
+         (keep (fn [l]
+                 ;; 壊れた 1 行で全部を失わない。ただし黙って捨てない ——
+                 ;; 読めなかった行数は下で報告する。
+                 (try (cljs.reader/read-string l) (catch :default _ nil)))))))
+
+(defn- run-once! []
+  (-> (js/Promise.all (clj->js (map probe! targets)))
+      (.then (fn [results]
+               (let [obs (vec (array-seq results))]
+                 (append! obs)
+                 (doseq [o obs]
+                   (println (name (:observation/outcome o))
+                            (:observation/target o)
+                            (str (:observation/latency-ms o) "ms")
+                            (or (:observation/detail o) "")))
+                 (println "appended" (count obs) "observation(s) to" observations-file))))))
+
+(def probe-interval-ms
+  "plist の StartInterval と同じ値。expected の計算に要る —— これが実際の
+   間隔とずれると coverage が嘘になるので、片方だけ変えないこと。"
+  300000)
+
+(defn- report! []
+  (let [obs (read-observations)
+        raw-lines (if (fs/existsSync observations-file)
+                    (count (remove str/blank? (str/split-lines (fs/readFileSync observations-file "utf8"))))
+                    0)
+        now (js/Date.now)
+        from (- now (* 24 60 60 1000))
+        expected (js/Math.floor (/ (- now from) probe-interval-ms))
+        stmts (mapv (fn [{:keys [url]}]
+                      (up/statement url obs from now {:expected expected}))
+                    targets)]
+    (when (not= raw-lines (count obs))
+      (println "WARNING:" (- raw-lines (count obs)) "行が読めませんでした（黙って捨てていません）"))
+    (doseq [s stmts] (println (up/describe s)))
+    (fs/writeFileSync
+     statement-file
+     (str ";; availability.edn — 生成物。scripts/probe.cljs --report が書く。\n"
+          ";; 手で編集しない —— 可用性の主張は観測からだけ作る。\n"
+          ";; unobserved は 100% ではない（uptime.core）。\n"
+          (pr-str {:availability/generated-at now
+                   :availability/window-hours 24
+                   :availability/probe-interval-ms probe-interval-ms
+                   :availability/statements stmts
+                   :availability/slo-target 0.999
+                   :availability/verdicts (mapv #(up/slo-verdict % 0.999) stmts)})
+          "\n"))
+    (println "wrote" statement-file)))
+
+(if (some #{"--report"} (or *command-line-args* []))
+  (report!)
+  (run-once!))

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  com.gftd.identity-probe.plist — authn.kotobase.net の外形監視。
+
+  なぜ launchd か: この workspace の定期実行は既に launchd に寄っている
+  (com.gftd.fleet-ci-tip-tick / com.gftd.observatory-run / com.gftd.newsfeed-ingest)。
+  別の scheduler を持ち込むと「どこで何が回っているか」が 2 箇所に割れる。
+
+  なぜ operator マシンで回すか: service の外から測るため。自分自身に
+  「動いているか」を聞く service は、落ちている時に何も言わない。
+
+  なぜ 5 分か: SLO の分母がこの間隔で決まる。scripts/probe.cljs の
+  probe-interval-ms と同じ値であること — 片方だけ変えると coverage が嘘になる。
+
+  RunAtLoad を true にしてある: 観測は副作用の無い GET なので、bootstrap 直後に
+  1 周走って困らない。fleet-ci が false なのは gate が重いからで、事情が違う。
+
+  注意: XML のコメントに 2 連ハイフンを書かないこと。書いた瞬間 plist が壊れ、
+  launchd はエラーを出さずに読み込まないだけなので、一番気付きにくい壊れ方をする。
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.gftd.identity-probe</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>cd /Users/junkawasaki/github/com-junkawasaki/orgs/cloud-itonami/cloud-itonami-isic-6311-identity &amp;&amp; exec /opt/homebrew/bin/nbb --classpath ../../kotoba-lang/uptime/src scripts/probe.cljs</string>
+  </array>
+
+  <key>StartInterval</key>
+  <integer>300</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/identity-probe.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/identity-probe.err</string>
+</dict>
+</plist>
