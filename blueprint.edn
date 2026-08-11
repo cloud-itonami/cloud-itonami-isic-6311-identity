@@ -1,0 +1,64 @@
+{:itonami.blueprint/id "cloud-itonami-isic-6311-identity"
+ :itonami.blueprint/name "Identity as a service (passkey-first, DID-native, immediately revocable)"
+ :itonami.blueprint/isic-rev4 "6311"
+ :itonami.blueprint/role "identity"
+ :itonami.blueprint/domain :data/identity
+ :itonami.blueprint/license "AGPL-3.0-or-later"
+ :itonami.blueprint/social-impact [:privacy :consumer-protection :accessibility]
+ :itonami.blueprint/robotics false
+ :itonami.blueprint/required-technologies [:identity :audit-ledger]
+ :itonami.blueprint/optional-technologies []
+ :itonami.blueprint/status :public-oss
+ :itonami.blueprint/maturity :not-yet-offered
+ :itonami.blueprint/design-adr "ADR-2608110200"
+ :itonami.blueprint/sibling
+ "cloud-itonami-isic-6311 (market data) and -chainexplorer (chain observation) are
+  the other 6311 businesses; this one sells hosting of an identity service"
+
+ ;; This repository is the BUSINESS. The service it sells is
+ ;; authn.kotobase.net (network-awai/net-kotobase), and the DID authority stays
+ ;; did:web:kotobase.net (ADR-2608039950 決定 1). Three layers, and the
+ ;; dependency only ever points one way:
+ ;;
+ ;;   authority   did:web:kotobase.net:*     never moves
+ ;;   service     authn.kotobase.net          infrastructure; knows nothing of money
+ ;;   business    this repo                   contracts, price, metering, invoices
+ ;;
+ ;; ADR-2608039950 once rejected cloud-itonami as a home for authentication, on
+ ;; the grounds that "認証は事業ではなくインフラで…依存の向きが逆転する". That
+ ;; objection is to burying the SERVICE here, not to selling it: the blueprint
+ ;; depends on authn, and authn does not know this repository exists.
+ :itonami.blueprint/service
+ {:host "authn.kotobase.net"
+  :repo "network-awai/net-kotobase"
+  :authority "did:web:kotobase.net"}
+
+ ;; HARD = refused with no approval path. SOFT = always reaches a human.
+ :itonami.blueprint/invariants
+ [{:inv 1 :hard true :name :price-is-data
+   :rule "an amount is computed only from pricing.edn and a recorded measurement; no number is written in code, and a price change never deploys the authentication service"}
+  {:inv 2 :hard true :name :only-measured-dimensions-are-priced
+   :rule "a plan may price only a dimension the meter records (:mau, :verification); a price book naming anything else is refused whole rather than partially honoured"}
+  {:inv 3 :hard true :name :every-amount-cites-its-count
+   :rule "an invoice line carries the month, dimension and quantity it came from; an amount a customer cannot trace to a count is not issued"}
+  {:inv 4 :hard true :name :unmeasured-is-not-zero
+   :rule "a month with no measurement is reported as :unmeasured and never as a zero-usage month; the two look identical on a bill and mean opposite things"}
+  {:inv 5 :hard true :name :free-tier-cannot-bill
+   :rule "a plan carrying a hard cap carries no overage rate; past the cap the answer is 'choose a plan', never a surprise invoice"}
+  {:inv 6 :hard true :name :custody-is-disclosed-before-purchase
+   :rule "the server-custody disclosure is shown to a buyer before selection; the gate is disclosure, not resolution — this service can sign as any user if compromised, and says so"}
+  {:inv 7 :hard true :name :gates-before-charging
+   :rule "no paid public availability while any gate in pricing.edn is unmet; the question is answered from data by pricing/sellable?, not from someone remembering"}
+  {:inv 8 :soft true :name :enterprise-terms-are-human
+   :rule "an availability commitment, a data-residency promise or a bespoke price reaches a human at any confidence; nothing here quotes a contract"}]
+
+ :itonami.blueprint/non-goals
+ ["operating a second identity authority — the DID namespace stays did:web:kotobase.net"
+  "storing or processing payments; this repo computes what is owed and stops"
+  "self-custody claims — sign-in keys are server-held and passkey-gated, and that is disclosed"
+  "certification (SOC 2 / ISO 27001 / HIPAA); buyers requiring one should not select this service"]
+
+ :itonami.blueprint/verification
+ {:tests "clojure -M:test — 10 tests / 38 assertions"
+  :note "the shipped pricing.edn is validated by the same code that prices it, so a
+         published price list cannot disagree with what would be charged"}}

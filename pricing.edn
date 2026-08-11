@@ -1,0 +1,127 @@
+;; The price book. DATA, not code — ADR-2608110200 決定 3.
+;;
+;; The service (authn.kotobase.net) emits dimensioned usage events and knows
+;; nothing about money. This file is the only place a number lives, so a price
+;; change is a one-file edit and never a deploy of the thing people sign in
+;; through. That separation is also what let the meter start before the price
+;; was decided, which mattered: a price can be chosen later, and a month that
+;; was not measured can never be measured afterwards.
+;;
+;; ## Nothing here is published yet
+;;
+;; `:status :proposed` on every plan. ADR-2608110200 決定 4 lists six gates that
+;; must be met before charging anyone, and three of them are not met today
+;; (custom domains, a public availability statement, and terms written for an
+;; identity service). Numbers exist so they can be argued with, not because
+;; anyone may be billed from them.
+;;
+;; ## Dimensions match what is actually measured
+;;
+;; `authn.usage` records exactly two things, and this file may only price those:
+;;
+;;   :mau            distinct account per calendar month, de-duplicated at write
+;;                   time with put-once. The number a seat price is computed from.
+;;   :verification   every accepted ceremony. Describes load, not seats — it is
+;;                   here so a customer imposing a hundred times the cost at the
+;;                   same seat count is visible rather than cross-subsidised.
+;;
+;; A dimension that is not in that list cannot be honoured. `pricing/problems`
+;; refuses the file rather than letting an invoice quote a number nobody counted.
+
+{:pricing/version 1
+ :pricing/currency "USD"
+ :pricing/updated "2026-08-11"
+ :pricing/authority "ADR-2608110200"
+
+ ;; Why per-MAU at all, when the operating cost is per-verification: it is the
+ ;; unit a buyer can check against their own headcount without trusting our
+ ;; meter. A price nobody can audit from their own records is a price that gets
+ ;; disputed at renewal.
+ :pricing/plans
+ [{:plan/id :free
+   :plan/name "Free"
+   :plan/status :proposed
+   :plan/monthly-base 0
+   :plan/included {:mau 1000}
+   :plan/overage {}
+   ;; No overage on the free plan: past the included MAU the answer is "choose a
+   ;; plan", not a surprise invoice. A free tier that can generate a bill is not
+   ;; a free tier.
+   :plan/hard-cap {:mau 1000}
+   :plan/features [:passkey :email-otp :oauth :totp :recovery-codes :organizations]
+   :plan/support :community
+   :plan/sla nil}
+
+  {:plan/id :growth
+   :plan/name "Growth"
+   :plan/status :proposed
+   :plan/monthly-base 25
+   :plan/included {:mau 10000}
+   :plan/overage {:mau 0.02}
+   :plan/hard-cap nil
+   :plan/features [:passkey :email-otp :oauth :totp :recovery-codes :organizations
+                   :scim :service-accounts :audit-log :custom-domain]
+   :plan/support :email
+   :plan/sla nil}
+
+  {:plan/id :enterprise
+   :plan/name "Enterprise"
+   :plan/status :proposed
+   ;; Deliberately no number. Enterprise terms here are SSO connections, data
+   ;; residency and a contractual availability commitment, and quoting a list
+   ;; price for a commitment nobody has written down yet would be a promise.
+   :plan/monthly-base nil
+   :plan/included {}
+   :plan/overage {}
+   :plan/hard-cap nil
+   :plan/features [:passkey :email-otp :oauth :totp :recovery-codes :organizations
+                   :scim :service-accounts :audit-log :custom-domain
+                   :enterprise-sso :data-residency]
+   :plan/support :contract
+   :plan/sla :negotiated}]
+
+ ;; What a customer is told, in the words they will read. Kept beside the
+ ;; numbers because a disclosure that lives somewhere else is a disclosure that
+ ;; drifts from what is being sold.
+ :pricing/disclosures
+ [{:disclosure/id :server-custody
+   :disclosure/severity :must-read
+   :disclosure/text
+   "Sign-in keys are held by this service and unlocked by your passkey — they
+    are not a wallet. If this service is compromised, an attacker can sign as
+    any user. A hardware key boundary (KMS/HSM) is not implemented. Customers
+    who require sole custody should use the did:key CACAO path, where the key
+    never leaves them."}
+  {:disclosure/id :no-jwks
+   :disclosure/severity :design
+   :disclosure/text
+   "Sessions are opaque tokens verified centrally, not signed JWTs. That is
+    what makes revocation immediate — signing out everywhere takes effect at
+    once rather than when a token expires — and it means every check reaches
+    this service. There is no offline verification and no JWKS endpoint."}
+  {:disclosure/id :adaptive-mfa
+   :disclosure/severity :scope
+   :disclosure/text
+   "Two-factor authentication is available (TOTP with recovery codes) and is
+    per-account opt-in. Risk-based step-up is not yet offered."}
+  {:disclosure/id :no-certification
+   :disclosure/severity :must-read
+   :disclosure/text
+   "No SOC 2, ISO 27001 or HIPAA certification. Buyers with a certification
+    requirement should not select this service."}]
+
+ ;; The gates, as data, so `pricing/sellable?` can answer instead of a person
+ ;; remembering. ADR-2608110200 決定 4.
+ :pricing/gates
+ [{:gate/id :mfa :gate/met true
+   :gate/note "TOTP + recovery codes live 2026-08-11 (net-kotobase 3b03e4f)"}
+  {:gate/id :custom-domain :gate/met false
+   :gate/note "AUTHN_APEXES is implemented and deployed but unset; no customer apex is routed"}
+  {:gate/id :metering :gate/met true
+   :gate/note "authn.usage live 2026-08-11; the read endpoint is fail-closed until AUTHN_USAGE_TOKEN is set"}
+  {:gate/id :availability-statement :gate/met false
+   :gate/note "no status page or SLO published for authn.kotobase.net itself"}
+  {:gate/id :terms :gate/met false
+   :gate/note "cloud-itonami's existing legal pages cover other businesses, not an identity service"}
+  {:gate/id :custody-disclosure :gate/met true
+   :gate/note "the :server-custody disclosure above; the gate is disclosure, not resolution"}]}

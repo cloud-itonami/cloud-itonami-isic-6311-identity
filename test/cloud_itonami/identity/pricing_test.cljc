@@ -1,0 +1,119 @@
+(ns cloud-itonami.identity.pricing-test
+  "Invoice arithmetic, and the refusals around it.
+
+  A wrong number here is not an exception. It is an amount a customer pays, or
+  does not pay, and the way anyone finds out is a dispute at renewal — the most
+  expensive moment to discover it."
+  (:require [clojure.test :refer [deftest is testing]]
+            [clojure.edn :as edn]
+            #?(:clj [clojure.java.io :as io])
+            [cloud-itonami.identity.pricing :as pricing]))
+
+(def book
+  #?(:clj (edn/read-string (slurp (io/file "pricing.edn")))
+     :cljs nil))
+
+(deftest the-shipped-price-book-is-usable
+  (is (empty? (pricing/problems book))
+      "the file this repo publishes must satisfy its own validator")
+  (is (= "USD" (:pricing/currency book)))
+  (testing "every priced dimension is one the meter actually records"
+    ;; The refusal that matters: quoting a number nobody counted.
+    (doseq [p (:pricing/plans book)
+            d (concat (keys (:plan/included p)) (keys (:plan/overage p)))]
+      (is (contains? pricing/billable-dimensions d) (str (:plan/id p) " / " d)))))
+
+(deftest a-book-that-prices-a-phantom-dimension-is-refused
+  (let [bad (update book :pricing/plans conj
+                    {:plan/id :bogus :plan/overage {:api-calls 0.001}})]
+    (is (= :unknown-dimension (:pricing.problem/code (first (pricing/problems bad)))))
+    (is (false? (pricing/usable? bad)))
+    (testing "and an invoice against it produces no amounts at all"
+      ;; Half an invoice is worse than none, because it looks like a whole one.
+      (let [inv (pricing/invoice bad :growth [{:month "2026-08" :active-users 5}])]
+        (is (seq (:invoice/problems inv)))
+        (is (nil? (:invoice/total inv)))))))
+
+(deftest nothing-is-sellable-until-the-gates-are-met
+  (is (false? (pricing/sellable? book))
+      "three gates are open today; this must be answerable from data, not memory")
+  (is (= #{:custom-domain :availability-statement :terms}
+         (set (map :gate/id (pricing/unmet-gates book)))))
+  (testing "and an invoice says so on its face"
+    (is (false? (:invoice/sellable? (pricing/invoice book :free [{:month "2026-08" :active-users 3}]))))))
+
+(deftest free-plan-cannot-generate-a-bill
+  (let [inv (pricing/invoice book :free [{:month "2026-08" :active-users 4000 :verifications 90000}])
+        line (first (:invoice/lines inv))]
+    (is (= :over-cap (:line/status line)))
+    (is (= :mau (:line/capped-dimension line)))
+    ;; A free tier that can produce a surprise invoice is not a free tier.
+    (is (zero? (:line/amount line)))
+    (is (zero? (:invoice/total inv)))))
+
+(deftest growth-charges-only-past-what-is-included
+  (testing "inside the allowance: the base and nothing else"
+    (let [inv (pricing/invoice book :growth [{:month "2026-08" :active-users 9999 :verifications 500000}])
+          line (first (:invoice/lines inv))]
+      (is (= 25.0 (:invoice/total inv)))
+      (is (empty? (:line/items line)))
+      (testing "and the measurement is on the line, or the amount is unauditable"
+        (is (= {:mau 9999 :verification 500000} (:line/measured line))))))
+
+  (testing "past it: base plus exactly the overage"
+    (let [inv (pricing/invoice book :growth [{:month "2026-08" :active-users 12500}])
+          item (first (:line/items (first (:invoice/lines inv))))]
+      (is (= 2500 (:item/quantity item)) "2500 users past the 10000 included")
+      (is (= 50.0 (:item/amount item)))
+      (is (= 75.0 (:invoice/total inv)))))
+
+  (testing "an under-used month is not a credit"
+    (is (= 25.0 (:invoice/total (pricing/invoice book :growth [{:month "2026-08" :active-users 12}]))))))
+
+(deftest an-unmeasured-month-is-not-a-zero-month
+  ;; These look identical on a bill and mean opposite things: one says nobody
+  ;; used the service, the other says we do not know. Collapsing them turns a
+  ;; metering outage into a credit note six months later.
+  (let [inv (pricing/invoice book :growth [{:month "2026-07"}
+                                           {:month "2026-08" :active-users 100}])]
+    (is (= ["2026-07"] (:invoice/unmeasured inv)))
+    (is (= :unmeasured (:line/status (first (:invoice/lines inv)))))
+    (is (= 25.0 (:invoice/total inv)) "the unmeasured month contributes nothing, silently to nobody")
+    (testing "a measured month with genuinely zero users still bills the base"
+      (is (= :billable (:line/status (first (:invoice/lines
+                                             (pricing/invoice book :growth
+                                                              [{:month "2026-07" :active-users 0}])))))))))
+
+(deftest multiple-months-add-up-and-stay-traceable
+  (let [inv (pricing/invoice book :growth [{:month "2026-06" :active-users 10000}
+                                           {:month "2026-07" :active-users 11000}
+                                           {:month "2026-08" :active-users 20000}])]
+    (is (= (+ 25.0 (+ 25.0 20.0) (+ 25.0 200.0)) (:invoice/total inv)))
+    (is (every? :line/measured (filter #(= :billable (:line/status %)) (:invoice/lines inv)))
+        "every billable line cites the count it came from")))
+
+(deftest unknown-plan-refuses
+  (is (= :unknown-plan (:pricing.problem/code
+                        (first (:invoice/problems (pricing/invoice book :platinum [])))))))
+
+(deftest the-must-read-disclosures-are-present-and-say-the-hard-thing
+  (let [ids (set (map :disclosure/id (pricing/must-read-disclosures book)))]
+    (is (contains? ids :server-custody)
+        "a buyer must be told the service can sign as any user if compromised")
+    (is (contains? ids :no-certification))
+    (testing "and the custody text says it plainly rather than by implication"
+      (let [t (:disclosure/text (first (filter #(= :server-custody (:disclosure/id %))
+                                               (:pricing/disclosures book))))]
+        ;; \s+ and not a literal space: the text is wrapped in the EDN, so a
+        ;; space assertion would test the line width rather than the wording.
+        (is (re-find #"sign as\s+any user" t))
+        (is (re-find #"not a wallet" t))))))
+
+(deftest the-published-summary-comes-from-the-same-data-as-the-invoice
+  ;; A price list that is written by hand disagrees with what is charged, and
+  ;; the disagreement is discovered by a customer.
+  (let [lines (vec (pricing/plan-summary book))]
+    (is (= 3 (count lines)))
+    (is (every? #(re-find #"proposed" %) lines) "nothing is offered yet")
+    (is (re-find #"USD 25/month" (second lines)))
+    (is (re-find #"10000 monthly active users included" (second lines)))))
