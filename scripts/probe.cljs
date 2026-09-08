@@ -24,7 +24,7 @@
 
 (ns probe
   (:require ["node:fs" :as fs]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [uptime.core :as up]))
 
 (def targets
