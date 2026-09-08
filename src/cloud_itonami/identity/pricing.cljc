@@ -19,7 +19,7 @@
   look the same on a bill and mean opposite things: one says nobody used the
   service, the other says we do not know. Collapsing them is how a metering
   outage becomes a credit note six months later."
-  (:require [clojure.string :as str]))
+  (:require [kotoba.lang.text :as str]))
 
 (def billable-dimensions
   "The dimensions the meter actually records. A price book that names anything
