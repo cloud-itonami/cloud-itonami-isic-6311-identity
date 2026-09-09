@@ -13,3 +13,6 @@
 # 公開すること」。
 observations.edn
 availability.edn
+
+# nbb dependency cache -- a build artifact, not source
+.nbb/
