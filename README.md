@@ -105,7 +105,7 @@ JWKS endpoint.
 ## Build
 
 ```bash
-clojure -M:test    # 10 tests / 38 assertions
+kbb -M:test    # 10 tests / 38 assertions
 ```
 
 Zero runtime dependencies on purpose: this code multiplies a measurement by a
