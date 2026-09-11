@@ -1,8 +1,8 @@
-#!/usr/bin/env nbb
+#!/usr/bin/env kbb
 ;; 外形監視。観測を append し、statement を測定値からだけ組む。
 ;;
-;;   nbb --classpath ../../kotoba-lang/uptime/src scripts/probe.cljk           ; 1 周観測する
-;;   nbb --classpath ../../kotoba-lang/uptime/src scripts/probe.cljk --report  ; 観測から statement を出す
+;;   kbb --backend sci --classpath ../../kotoba-lang/uptime/src scripts/probe.cljk           ; 1 周観測する
+;;   kbb --backend sci --classpath ../../kotoba-lang/uptime/src scripts/probe.cljk --report  ; 観測から statement を出す
 ;;
 ;; ## なぜ外から測るか
 ;;
