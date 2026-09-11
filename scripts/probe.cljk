@@ -1,8 +1,8 @@
 #!/usr/bin/env nbb
 ;; 外形監視。観測を append し、statement を測定値からだけ組む。
 ;;
-;;   nbb --classpath ../../kotoba-lang/uptime/src scripts/probe.cljs           ; 1 周観測する
-;;   nbb --classpath ../../kotoba-lang/uptime/src scripts/probe.cljs --report  ; 観測から statement を出す
+;;   nbb --classpath ../../kotoba-lang/uptime/src scripts/probe.cljk           ; 1 周観測する
+;;   nbb --classpath ../../kotoba-lang/uptime/src scripts/probe.cljk --report  ; 観測から statement を出す
 ;;
 ;; ## なぜ外から測るか
 ;;
@@ -113,7 +113,7 @@
     (doseq [s stmts] (println (up/describe s)))
     (fs/writeFileSync
      statement-file
-     (str ";; availability.edn — 生成物。scripts/probe.cljs --report が書く。\n"
+     (str ";; availability.edn — 生成物。scripts/probe.cljk --report が書く。\n"
           ";; 手で編集しない —— 可用性の主張は観測からだけ作る。\n"
           ";; unobserved は 100% ではない（uptime.core）。\n"
           (pr-str {:availability/generated-at now
