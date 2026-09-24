@@ -6,7 +6,7 @@
   expensive moment to discover it."
   (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.lang.edn :as edn]
-            #?(:clj [clojure.java.io :as io])
+            #?(:clj [kotoba.io :as io])
             [cloud-itonami.identity.pricing :as pricing]))
 
 (def book
