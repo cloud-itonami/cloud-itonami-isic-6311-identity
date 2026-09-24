@@ -4,7 +4,7 @@
   A wrong number here is not an exception. It is an amount a customer pays, or
   does not pay, and the way anyone finds out is a dispute at renewal — the most
   expensive moment to discover it."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [clojure.edn :as edn]
             #?(:clj [clojure.java.io :as io])
             [cloud-itonami.identity.pricing :as pricing]))
