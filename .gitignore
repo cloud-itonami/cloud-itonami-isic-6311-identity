@@ -5,7 +5,7 @@
 #
 # **追跡しない理由は「重要でないから」ではない。** prober は 5 分ごとに追記する
 # ので、追跡すると west 管理下の checkout が恒久的に dirty になり、他セッションの
-# `west update` を止める（CLAUDE.md「並行エージェント運用」）。
+# `west update` を止める（AGENTS.md「並行エージェント運用」）。
 #
 # したがって今の観測は **operator マシンのローカルにしか無い**。これは
 # ADR-2608110200 決定 4 の :availability-statement gate が未達である理由の
